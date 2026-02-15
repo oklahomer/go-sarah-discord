@@ -2,6 +2,7 @@
 
 [![CI](https://github.com/oklahomer/go-sarah-discord/actions/workflows/ci.yml/badge.svg)](https://github.com/oklahomer/go-sarah-discord/actions/workflows/ci.yml)
 [![Coverage Status](https://coveralls.io/repos/github/oklahomer/go-sarah-discord/badge.svg?branch=main)](https://coveralls.io/github/oklahomer/go-sarah-discord?branch=main)
+[![Go Report Card](https://goreportcard.com/badge/github.com/oklahomer/go-sarah-discord)](https://goreportcard.com/report/github.com/oklahomer/go-sarah-discord)
 
 A [go-sarah](https://github.com/oklahomer/go-sarah) adapter for [Discord](https://discord.com/).
 
