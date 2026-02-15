@@ -1,5 +1,6 @@
 # go-sarah-discord
 
+[![Go Reference](https://pkg.go.dev/badge/github.com/oklahomer/go-sarah-discord.svg)](https://pkg.go.dev/github.com/oklahomer/go-sarah-discord)
 [![CI](https://github.com/oklahomer/go-sarah-discord/actions/workflows/ci.yml/badge.svg)](https://github.com/oklahomer/go-sarah-discord/actions/workflows/ci.yml)
 [![Coverage Status](https://coveralls.io/repos/github/oklahomer/go-sarah-discord/badge.svg?branch=main)](https://coveralls.io/github/oklahomer/go-sarah-discord?branch=main)
 [![Go Report Card](https://goreportcard.com/badge/github.com/oklahomer/go-sarah-discord)](https://goreportcard.com/report/github.com/oklahomer/go-sarah-discord)
