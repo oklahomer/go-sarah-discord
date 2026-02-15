@@ -2,6 +2,7 @@ package discord
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -13,10 +14,10 @@ import (
 
 // mockSession implements the session interface for testing.
 type mockSession struct {
-	addHandlerFunc         func(handler interface{}) func()
-	openFunc               func() error
-	closeFunc              func() error
-	channelMessageSendFunc func(channelID string, content string, options ...discordgo.RequestOption) (*discordgo.Message, error)
+	addHandlerFunc                func(handler interface{}) func()
+	openFunc                      func() error
+	closeFunc                     func() error
+	channelMessageSendFunc        func(channelID string, content string, options ...discordgo.RequestOption) (*discordgo.Message, error)
 	channelMessageSendComplexFunc func(channelID string, data *discordgo.MessageSend, options ...discordgo.RequestOption) (*discordgo.Message, error)
 }
 
@@ -56,7 +57,7 @@ func (m *mockSession) ChannelMessageSendComplex(channelID string, data *discordg
 }
 
 func TestBotTypeValue(t *testing.T) {
-	if DISCORD != sarah.BotType("discord") {
+	if DISCORD != ("discord") {
 		t.Errorf("Expected DISCORD to be %q, got %q", "discord", DISCORD)
 	}
 }
@@ -666,7 +667,7 @@ func TestMessageToInput_NilAuthor(t *testing.T) {
 		t.Fatal("Expected error for nil Author")
 	}
 
-	if err != ErrNoAuthor {
+	if !errors.Is(err, ErrNoAuthor) {
 		t.Errorf("Expected ErrNoAuthor, got %+v", err)
 	}
 }
@@ -731,7 +732,7 @@ func TestInput_SarahInputInterface(t *testing.T) {
 		senderKey: "key",
 		text:      "text",
 		sentAt:    time.Now(),
-		channelID: ChannelID("ch"),
+		channelID: "ch",
 	}
 
 	if sarahInput.SenderKey() != "key" {
