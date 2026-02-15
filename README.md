@@ -12,7 +12,7 @@ This adapter bridges go-sarah's bot framework with Discord, using [discordgo](ht
 ## Prerequisites
 
 - Go 1.25+
-- A Discord bot token (see [Creating a Bot Account](https://discordgo.readthedocs.io/en/latest/getting_started/01-getting_started/#creating-a-bot-account))
+- A Discord bot token (see [Discord Developer Portal](https://discord.com/developers/applications))
 
 When creating your bot in the [Discord Developer Portal](https://discord.com/developers/applications), ensure the following are enabled under **Bot** settings:
 - **Message Content Intent** (required to read message content)
