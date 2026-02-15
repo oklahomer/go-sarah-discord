@@ -11,6 +11,50 @@ import (
 	"github.com/oklahomer/go-sarah/v4"
 )
 
+// mockSession implements the session interface for testing.
+type mockSession struct {
+	addHandlerFunc         func(handler interface{}) func()
+	openFunc               func() error
+	closeFunc              func() error
+	channelMessageSendFunc func(channelID string, content string, options ...discordgo.RequestOption) (*discordgo.Message, error)
+	channelMessageSendComplexFunc func(channelID string, data *discordgo.MessageSend, options ...discordgo.RequestOption) (*discordgo.Message, error)
+}
+
+func (m *mockSession) AddHandler(handler interface{}) func() {
+	if m.addHandlerFunc != nil {
+		return m.addHandlerFunc(handler)
+	}
+	return func() {}
+}
+
+func (m *mockSession) Open() error {
+	if m.openFunc != nil {
+		return m.openFunc()
+	}
+	return nil
+}
+
+func (m *mockSession) Close() error {
+	if m.closeFunc != nil {
+		return m.closeFunc()
+	}
+	return nil
+}
+
+func (m *mockSession) ChannelMessageSend(channelID string, content string, options ...discordgo.RequestOption) (*discordgo.Message, error) {
+	if m.channelMessageSendFunc != nil {
+		return m.channelMessageSendFunc(channelID, content, options...)
+	}
+	return &discordgo.Message{}, nil
+}
+
+func (m *mockSession) ChannelMessageSendComplex(channelID string, data *discordgo.MessageSend, options ...discordgo.RequestOption) (*discordgo.Message, error) {
+	if m.channelMessageSendComplexFunc != nil {
+		return m.channelMessageSendComplexFunc(channelID, data, options...)
+	}
+	return &discordgo.Message{}, nil
+}
+
 func TestBotTypeValue(t *testing.T) {
 	if DISCORD != sarah.BotType("discord") {
 		t.Errorf("Expected DISCORD to be %q, got %q", "discord", DISCORD)
@@ -74,6 +118,122 @@ func TestAdapter_BotType(t *testing.T) {
 	if adapter.BotType() != DISCORD {
 		t.Errorf("Expected BotType to be %q, got %q", DISCORD, adapter.BotType())
 	}
+}
+
+func TestAdapter_Run(t *testing.T) {
+	t.Run("Open fails", func(t *testing.T) {
+		mock := &mockSession{
+			openFunc: func() error {
+				return fmt.Errorf("connection refused")
+			},
+		}
+
+		adapter := &Adapter{
+			config:  NewConfig(),
+			session: mock,
+		}
+
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+
+		var notifiedErr error
+		notifyErr := func(err error) {
+			notifiedErr = err
+		}
+
+		adapter.Run(ctx, func(input sarah.Input) error { return nil }, notifyErr)
+
+		if notifiedErr == nil {
+			t.Fatal("Expected notifyErr to be called when Open fails")
+		}
+
+		errStr := notifiedErr.Error()
+		if !strings.Contains(errStr, "connection refused") {
+			t.Errorf("Expected error to contain 'connection refused', got %q", errStr)
+		}
+	})
+
+	t.Run("context canceled calls Close", func(t *testing.T) {
+		var closeCalled bool
+		mock := &mockSession{
+			closeFunc: func() error {
+				closeCalled = true
+				return nil
+			},
+		}
+
+		adapter := &Adapter{
+			config:  NewConfig(),
+			session: mock,
+		}
+
+		ctx, cancel := context.WithCancel(context.Background())
+
+		done := make(chan struct{})
+		go func() {
+			adapter.Run(ctx, func(input sarah.Input) error { return nil }, func(err error) {})
+			close(done)
+		}()
+
+		// Cancel context to unblock Run
+		cancel()
+		<-done
+
+		if !closeCalled {
+			t.Error("Expected Close to be called after context cancellation")
+		}
+	})
+
+	t.Run("Close error is handled gracefully", func(t *testing.T) {
+		mock := &mockSession{
+			closeFunc: func() error {
+				return fmt.Errorf("close failed")
+			},
+		}
+
+		adapter := &Adapter{
+			config:  NewConfig(),
+			session: mock,
+		}
+
+		ctx, cancel := context.WithCancel(context.Background())
+
+		done := make(chan struct{})
+		go func() {
+			adapter.Run(ctx, func(input sarah.Input) error { return nil }, func(err error) {})
+			close(done)
+		}()
+
+		cancel()
+		<-done
+
+		// Should not panic -- the error is logged internally
+	})
+
+	t.Run("AddHandler is called", func(t *testing.T) {
+		var handlerRegistered bool
+		mock := &mockSession{
+			addHandlerFunc: func(handler interface{}) func() {
+				handlerRegistered = true
+				return func() {}
+			},
+			openFunc: func() error {
+				return fmt.Errorf("stop here")
+			},
+		}
+
+		adapter := &Adapter{
+			config:  NewConfig(),
+			session: mock,
+		}
+
+		ctx := context.Background()
+		adapter.Run(ctx, func(input sarah.Input) error { return nil }, func(err error) {})
+
+		if !handlerRegistered {
+			t.Error("Expected AddHandler to be called")
+		}
+	})
 }
 
 func TestAdapter_handleMessage(t *testing.T) {
@@ -341,24 +501,20 @@ func TestAdapter_handleMessage(t *testing.T) {
 	})
 }
 
-func TestAdapter_sendMessage(t *testing.T) {
-	adapter := &Adapter{config: NewConfig()}
-
+func TestAdapter_SendMessage(t *testing.T) {
 	t.Run("string content", func(t *testing.T) {
 		var gotChannelID, gotContent string
-
-		sendText := func(channelID, content string, opts ...discordgo.RequestOption) (*discordgo.Message, error) {
-			gotChannelID = channelID
-			gotContent = content
-			return &discordgo.Message{}, nil
+		mock := &mockSession{
+			channelMessageSendFunc: func(channelID, content string, opts ...discordgo.RequestOption) (*discordgo.Message, error) {
+				gotChannelID = channelID
+				gotContent = content
+				return &discordgo.Message{}, nil
+			},
 		}
-		sendComplex := func(channelID string, data *discordgo.MessageSend, opts ...discordgo.RequestOption) (*discordgo.Message, error) {
-			t.Error("sendComplex should not be called for string content")
-			return nil, nil
-		}
+		adapter := &Adapter{config: NewConfig(), session: mock}
 
 		output := sarah.NewOutputMessage(ChannelID("ch-1"), "hello world")
-		adapter.sendMessage(output, sendText, sendComplex)
+		adapter.SendMessage(context.Background(), output)
 
 		if gotChannelID != "ch-1" {
 			t.Errorf("Expected channelID %q, got %q", "ch-1", gotChannelID)
@@ -369,35 +525,33 @@ func TestAdapter_sendMessage(t *testing.T) {
 	})
 
 	t.Run("string content with send error", func(t *testing.T) {
-		sendText := func(channelID, content string, opts ...discordgo.RequestOption) (*discordgo.Message, error) {
-			return nil, fmt.Errorf("send failed")
+		mock := &mockSession{
+			channelMessageSendFunc: func(channelID, content string, opts ...discordgo.RequestOption) (*discordgo.Message, error) {
+				return nil, fmt.Errorf("send failed")
+			},
 		}
-		sendComplex := func(channelID string, data *discordgo.MessageSend, opts ...discordgo.RequestOption) (*discordgo.Message, error) {
-			return nil, nil
-		}
+		adapter := &Adapter{config: NewConfig(), session: mock}
 
 		output := sarah.NewOutputMessage(ChannelID("ch-1"), "hello")
 		// Should not panic, just log the error
-		adapter.sendMessage(output, sendText, sendComplex)
+		adapter.SendMessage(context.Background(), output)
 	})
 
 	t.Run("MessageSend content", func(t *testing.T) {
 		var gotChannelID string
 		var gotData *discordgo.MessageSend
-
-		sendText := func(channelID, content string, opts ...discordgo.RequestOption) (*discordgo.Message, error) {
-			t.Error("sendText should not be called for MessageSend content")
-			return nil, nil
+		mock := &mockSession{
+			channelMessageSendComplexFunc: func(channelID string, data *discordgo.MessageSend, opts ...discordgo.RequestOption) (*discordgo.Message, error) {
+				gotChannelID = channelID
+				gotData = data
+				return &discordgo.Message{}, nil
+			},
 		}
-		sendComplex := func(channelID string, data *discordgo.MessageSend, opts ...discordgo.RequestOption) (*discordgo.Message, error) {
-			gotChannelID = channelID
-			gotData = data
-			return &discordgo.Message{}, nil
-		}
+		adapter := &Adapter{config: NewConfig(), session: mock}
 
 		msg := &discordgo.MessageSend{Content: "complex msg"}
 		output := sarah.NewOutputMessage(ChannelID("ch-2"), msg)
-		adapter.sendMessage(output, sendText, sendComplex)
+		adapter.SendMessage(context.Background(), output)
 
 		if gotChannelID != "ch-2" {
 			t.Errorf("Expected channelID %q, got %q", "ch-2", gotChannelID)
@@ -408,36 +562,35 @@ func TestAdapter_sendMessage(t *testing.T) {
 	})
 
 	t.Run("MessageSend content with send error", func(t *testing.T) {
-		sendText := func(channelID, content string, opts ...discordgo.RequestOption) (*discordgo.Message, error) {
-			return nil, nil
+		mock := &mockSession{
+			channelMessageSendComplexFunc: func(channelID string, data *discordgo.MessageSend, opts ...discordgo.RequestOption) (*discordgo.Message, error) {
+				return nil, fmt.Errorf("send failed")
+			},
 		}
-		sendComplex := func(channelID string, data *discordgo.MessageSend, opts ...discordgo.RequestOption) (*discordgo.Message, error) {
-			return nil, fmt.Errorf("send failed")
-		}
+		adapter := &Adapter{config: NewConfig(), session: mock}
 
 		msg := &discordgo.MessageSend{Content: "complex msg"}
 		output := sarah.NewOutputMessage(ChannelID("ch-2"), msg)
 		// Should not panic, just log the error
-		adapter.sendMessage(output, sendText, sendComplex)
+		adapter.SendMessage(context.Background(), output)
 	})
 
 	t.Run("CommandHelps content", func(t *testing.T) {
 		var gotContent string
-
-		sendText := func(channelID, content string, opts ...discordgo.RequestOption) (*discordgo.Message, error) {
-			gotContent = content
-			return &discordgo.Message{}, nil
+		mock := &mockSession{
+			channelMessageSendFunc: func(channelID, content string, opts ...discordgo.RequestOption) (*discordgo.Message, error) {
+				gotContent = content
+				return &discordgo.Message{}, nil
+			},
 		}
-		sendComplex := func(channelID string, data *discordgo.MessageSend, opts ...discordgo.RequestOption) (*discordgo.Message, error) {
-			return nil, nil
-		}
+		adapter := &Adapter{config: NewConfig(), session: mock}
 
 		helps := &sarah.CommandHelps{
 			{Identifier: "echo", Instruction: "Input .echo to echo back"},
 			{Identifier: "hello", Instruction: "Input .hello to greet"},
 		}
 		output := sarah.NewOutputMessage(ChannelID("ch-3"), helps)
-		adapter.sendMessage(output, sendText, sendComplex)
+		adapter.SendMessage(context.Background(), output)
 
 		if !strings.Contains(gotContent, "**echo**: Input .echo to echo back") {
 			t.Errorf("Expected help text to contain echo, got %q", gotContent)
@@ -448,47 +601,53 @@ func TestAdapter_sendMessage(t *testing.T) {
 	})
 
 	t.Run("CommandHelps content with send error", func(t *testing.T) {
-		sendText := func(channelID, content string, opts ...discordgo.RequestOption) (*discordgo.Message, error) {
-			return nil, fmt.Errorf("send failed")
+		mock := &mockSession{
+			channelMessageSendFunc: func(channelID, content string, opts ...discordgo.RequestOption) (*discordgo.Message, error) {
+				return nil, fmt.Errorf("send failed")
+			},
 		}
-		sendComplex := func(channelID string, data *discordgo.MessageSend, opts ...discordgo.RequestOption) (*discordgo.Message, error) {
-			return nil, nil
-		}
+		adapter := &Adapter{config: NewConfig(), session: mock}
 
 		helps := &sarah.CommandHelps{
 			{Identifier: "echo", Instruction: "echo help"},
 		}
 		output := sarah.NewOutputMessage(ChannelID("ch-3"), helps)
 		// Should not panic, just log the error
-		adapter.sendMessage(output, sendText, sendComplex)
+		adapter.SendMessage(context.Background(), output)
 	})
 
 	t.Run("invalid destination type", func(t *testing.T) {
-		sendText := func(channelID, content string, opts ...discordgo.RequestOption) (*discordgo.Message, error) {
-			t.Error("sendText should not be called for invalid destination")
-			return nil, nil
+		mock := &mockSession{
+			channelMessageSendFunc: func(channelID, content string, opts ...discordgo.RequestOption) (*discordgo.Message, error) {
+				t.Error("ChannelMessageSend should not be called for invalid destination")
+				return nil, nil
+			},
+			channelMessageSendComplexFunc: func(channelID string, data *discordgo.MessageSend, opts ...discordgo.RequestOption) (*discordgo.Message, error) {
+				t.Error("ChannelMessageSendComplex should not be called for invalid destination")
+				return nil, nil
+			},
 		}
-		sendComplex := func(channelID string, data *discordgo.MessageSend, opts ...discordgo.RequestOption) (*discordgo.Message, error) {
-			t.Error("sendComplex should not be called for invalid destination")
-			return nil, nil
-		}
+		adapter := &Adapter{config: NewConfig(), session: mock}
 
 		output := sarah.NewOutputMessage("not-a-channel-id", "hello")
-		adapter.sendMessage(output, sendText, sendComplex)
+		adapter.SendMessage(context.Background(), output)
 	})
 
 	t.Run("unexpected content type", func(t *testing.T) {
-		sendText := func(channelID, content string, opts ...discordgo.RequestOption) (*discordgo.Message, error) {
-			t.Error("sendText should not be called for unexpected content")
-			return nil, nil
+		mock := &mockSession{
+			channelMessageSendFunc: func(channelID, content string, opts ...discordgo.RequestOption) (*discordgo.Message, error) {
+				t.Error("ChannelMessageSend should not be called for unexpected content")
+				return nil, nil
+			},
+			channelMessageSendComplexFunc: func(channelID string, data *discordgo.MessageSend, opts ...discordgo.RequestOption) (*discordgo.Message, error) {
+				t.Error("ChannelMessageSendComplex should not be called for unexpected content")
+				return nil, nil
+			},
 		}
-		sendComplex := func(channelID string, data *discordgo.MessageSend, opts ...discordgo.RequestOption) (*discordgo.Message, error) {
-			t.Error("sendComplex should not be called for unexpected content")
-			return nil, nil
-		}
+		adapter := &Adapter{config: NewConfig(), session: mock}
 
 		output := sarah.NewOutputMessage(ChannelID("ch-1"), 12345) // int is unexpected
-		adapter.sendMessage(output, sendText, sendComplex)
+		adapter.SendMessage(context.Background(), output)
 	})
 }
 

@@ -16,6 +16,17 @@ const (
 	DISCORD sarah.BotType = "discord"
 )
 
+// session is an internal interface that abstracts the discordgo.Session methods
+// used by the Adapter. This allows mocking the session in tests.
+// *discordgo.Session satisfies this interface.
+type session interface {
+	AddHandler(handler interface{}) func()
+	Open() error
+	Close() error
+	ChannelMessageSend(channelID string, content string, options ...discordgo.RequestOption) (*discordgo.Message, error)
+	ChannelMessageSendComplex(channelID string, data *discordgo.MessageSend, options ...discordgo.RequestOption) (*discordgo.Message, error)
+}
+
 // ChannelID represents a Discord channel as sarah.OutputDestination.
 type ChannelID string
 
@@ -36,7 +47,7 @@ func WithSession(session *discordgo.Session) AdapterOption {
 // Adapter is a sarah.Adapter implementation for Discord.
 type Adapter struct {
 	config  *Config
-	session *discordgo.Session
+	session session
 }
 
 var _ sarah.Adapter = (*Adapter)(nil)
@@ -60,6 +71,7 @@ func NewAdapter(config *Config, options ...AdapterOption) (*Adapter, error) {
 		if err != nil {
 			return nil, fmt.Errorf("failed to create Discord session: %w", err)
 		}
+		s.Identify.Intents = config.Intents
 		adapter.session = s
 	}
 
@@ -73,8 +85,6 @@ func (a *Adapter) BotType() sarah.BotType {
 
 // Run establishes a connection with Discord and blocks until the context is canceled.
 func (a *Adapter) Run(ctx context.Context, enqueueInput func(sarah.Input) error, notifyErr func(error)) {
-	a.session.Identify.Intents = a.config.Intents
-
 	a.session.AddHandler(func(s *discordgo.Session, m *discordgo.MessageCreate) {
 		a.handleMessage(s, m, enqueueInput)
 	})
@@ -95,19 +105,15 @@ func (a *Adapter) Run(ctx context.Context, enqueueInput func(sarah.Input) error,
 
 // handleMessage processes an incoming Discord message and routes it to enqueueInput.
 func (a *Adapter) handleMessage(s *discordgo.Session, m *discordgo.MessageCreate, enqueueInput func(sarah.Input) error) {
-	// Ignore messages without an author (e.g., system messages).
-	if m.Author == nil {
+	input, err := MessageToInput(m)
+	if err != nil {
+		// MessageToInput returns ErrNoAuthor for system messages with no author.
+		logger.Debugf("Skipping message: %+v", err)
 		return
 	}
 
 	// Ignore messages from the bot itself.
 	if s.State != nil && s.State.User != nil && m.Author.ID == s.State.User.ID {
-		return
-	}
-
-	input, err := MessageToInput(m)
-	if err != nil {
-		logger.Errorf("Failed to convert message to Input: %+v", err)
 		return
 	}
 
@@ -127,15 +133,6 @@ func (a *Adapter) handleMessage(s *discordgo.Session, m *discordgo.MessageCreate
 
 // SendMessage sends the given message to Discord.
 func (a *Adapter) SendMessage(_ context.Context, output sarah.Output) {
-	a.sendMessage(output, a.session.ChannelMessageSend, a.session.ChannelMessageSendComplex)
-}
-
-// sendMessage contains the core sending logic, separated from the session for testability.
-func (a *Adapter) sendMessage(
-	output sarah.Output,
-	sendText func(string, string, ...discordgo.RequestOption) (*discordgo.Message, error),
-	sendComplex func(string, *discordgo.MessageSend, ...discordgo.RequestOption) (*discordgo.Message, error),
-) {
 	destination, ok := output.Destination().(ChannelID)
 	if !ok {
 		logger.Errorf("Destination is not instance of ChannelID. %#v.", output.Destination())
@@ -146,13 +143,13 @@ func (a *Adapter) sendMessage(
 
 	switch content := output.Content().(type) {
 	case string:
-		_, err := sendText(channelID, content)
+		_, err := a.session.ChannelMessageSend(channelID, content)
 		if err != nil {
 			logger.Errorf("Failed to send message to %s: %+v", channelID, err)
 		}
 
 	case *discordgo.MessageSend:
-		_, err := sendComplex(channelID, content)
+		_, err := a.session.ChannelMessageSendComplex(channelID, content)
 		if err != nil {
 			logger.Errorf("Failed to send complex message to %s: %+v", channelID, err)
 		}
@@ -163,7 +160,7 @@ func (a *Adapter) sendMessage(
 			lines = append(lines, fmt.Sprintf("**%s**: %s", h.Identifier, h.Instruction))
 		}
 		text := strings.Join(lines, "\n")
-		_, err := sendText(channelID, text)
+		_, err := a.session.ChannelMessageSend(channelID, text)
 		if err != nil {
 			logger.Errorf("Failed to send help message to %s: %+v", channelID, err)
 		}
