@@ -1,0 +1,60 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        go-version: ['1.25', '1.26', 'tip']
+      fail-fast: false
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go ${{ matrix.go-version }}
+        if: matrix.go-version != 'tip'
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ matrix.go-version }}
+
+      - name: Set up Go tip
+        if: matrix.go-version == 'tip'
+        run: |
+          git clone --depth=1 https://go.googlesource.com/go "$HOME/gotip"
+          cd "$HOME/gotip/src"
+          ./make.bash
+          echo "$HOME/gotip/bin" >> "$GITHUB_PATH"
+
+      - name: Build
+        run: go build ./...
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Test
+        run: go test -v -race -coverprofile=coverage.out ./...
+
+      - name: Build example
+        run: go build -o /dev/null ./_example/
+
+      - name: Check coverage
+        run: |
+          coverage=$(go tool cover -func=coverage.out | grep total | awk '{print $3}' | tr -d '%')
+          echo "Total coverage: ${coverage}%"
+          threshold=80.0
+          if echo "$coverage $threshold" | awk '{exit !($1 < $2)}'; then
+            echo "::error::Coverage ${coverage}% is below threshold ${threshold}%"
+            exit 1
+          fi
+
+      - name: Send coverage to Coveralls
+        if: matrix.go-version == '1.25'
+        uses: coverallsapp/github-action@v2
+        with:
+          file: coverage.out
+          format: golang

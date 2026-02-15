@@ -1,5 +1,8 @@
 # go-sarah-discord
 
+[![CI](https://github.com/oklahomer/go-sarah-discord/actions/workflows/ci.yml/badge.svg)](https://github.com/oklahomer/go-sarah-discord/actions/workflows/ci.yml)
+[![Coverage Status](https://coveralls.io/repos/github/oklahomer/go-sarah-discord/badge.svg?branch=main)](https://coveralls.io/github/oklahomer/go-sarah-discord?branch=main)
+
 A [go-sarah](https://github.com/oklahomer/go-sarah) adapter for [Discord](https://discord.com/).
 
 This adapter bridges go-sarah's bot framework with Discord, using [discordgo](https://github.com/bwmarrin/discordgo) for the underlying Discord API integration.
