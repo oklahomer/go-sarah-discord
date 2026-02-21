@@ -1,5 +1,5 @@
 // This is an example bot that demonstrates how to use go-sarah-discord.
-// It registers two commands: echo and hello.
+// It registers three commands: echo, hello, and description.
 //
 // Usage:
 //
@@ -10,6 +10,7 @@
 //
 //	.echo Hello, World!
 //	.hello
+//	.description
 //	.help
 package main
 
@@ -21,6 +22,7 @@ import (
 	"regexp"
 	"syscall"
 
+	"github.com/bwmarrin/discordgo"
 	"github.com/oklahomer/go-kasumi/logger"
 	"github.com/oklahomer/go-sarah/v4"
 
@@ -56,6 +58,7 @@ func main() {
 	// Register example commands.
 	registerEchoCommand()
 	registerHelloCommand()
+	registerDescriptionCommand()
 
 	// Set up a context that cancels on SIGINT or SIGTERM.
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
@@ -105,6 +108,38 @@ func registerHelloCommand() {
 			return discord.NewResponse(input, "Hello, World!")
 		}).
 		Instruction("Input .hello to receive a greeting.").
+		MustBuild()
+
+	sarah.RegisterCommandProps(props)
+}
+
+var descriptionPattern = regexp.MustCompile(`^\.description`)
+
+func registerDescriptionCommand() {
+	props := sarah.NewCommandPropsBuilder().
+		BotType(discord.DISCORD).
+		Identifier("description").
+		MatchPattern(descriptionPattern).
+		Func(func(ctx context.Context, input sarah.Input) (*sarah.CommandResponse, error) {
+			return discord.NewResponse(input, &discordgo.MessageSend{
+				Embeds: []*discordgo.MessageEmbed{
+					{
+						Title:       "go-sarah-discord",
+						Description: "A Discord adapter for the go-sarah bot framework.",
+						Color:       0x5865F2, // Discord blurple
+						Fields: []*discordgo.MessageEmbedField{
+							{Name: "Echo", Value: "`.echo <message>` — echoes your message back", Inline: false},
+							{Name: "Hello", Value: "`.hello` — receive a greeting", Inline: false},
+							{Name: "Description", Value: "`.description` — display this embed", Inline: false},
+						},
+						Footer: &discordgo.MessageEmbedFooter{
+							Text: "Powered by go-sarah",
+						},
+					},
+				},
+			})
+		}).
+		Instruction("Input .description to display a rich embed message.").
 		MustBuild()
 
 	sarah.RegisterCommandProps(props)
