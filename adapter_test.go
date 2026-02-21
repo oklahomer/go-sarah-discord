@@ -838,6 +838,98 @@ func TestNewResponse(t *testing.T) {
 			t.Fatal("Expected an error for non-discord Input")
 		}
 	})
+
+	t.Run("MessageSend content", func(t *testing.T) {
+		input := &Input{
+			senderKey: "ch_user",
+			text:      ".rich",
+			sentAt:    time.Now(),
+			channelID: ChannelID("ch"),
+		}
+
+		msg := &discordgo.MessageSend{
+			Content: "rich message",
+			Embeds: []*discordgo.MessageEmbed{
+				{
+					Title:       "Test Embed",
+					Description: "This is a test embed.",
+					Color:       0x00ff00,
+				},
+			},
+		}
+
+		resp, err := NewResponse(input, msg)
+		if err != nil {
+			t.Fatalf("Unexpected error: %+v", err)
+		}
+
+		got, ok := resp.Content.(*discordgo.MessageSend)
+		if !ok {
+			t.Fatalf("Expected content to be *discordgo.MessageSend, got %T", resp.Content)
+		}
+
+		if got.Content != "rich message" {
+			t.Errorf("Expected content text %q, got %q", "rich message", got.Content)
+		}
+
+		if len(got.Embeds) != 1 {
+			t.Fatalf("Expected 1 embed, got %d", len(got.Embeds))
+		}
+
+		if got.Embeds[0].Title != "Test Embed" {
+			t.Errorf("Expected embed title %q, got %q", "Test Embed", got.Embeds[0].Title)
+		}
+
+		if resp.UserContext != nil {
+			t.Error("Expected nil UserContext for simple response")
+		}
+	})
+
+	t.Run("MessageSend content with next", func(t *testing.T) {
+		input := &Input{
+			senderKey: "ch_user",
+			text:      ".start",
+			sentAt:    time.Now(),
+			channelID: ChannelID("ch"),
+		}
+
+		msg := &discordgo.MessageSend{Content: "step 1"}
+		nextFunc := func(ctx context.Context, input sarah.Input) (*sarah.CommandResponse, error) {
+			return &sarah.CommandResponse{Content: "step 2"}, nil
+		}
+
+		resp, err := NewResponse(input, msg, RespWithNext(nextFunc))
+		if err != nil {
+			t.Fatalf("Unexpected error: %+v", err)
+		}
+
+		if _, ok := resp.Content.(*discordgo.MessageSend); !ok {
+			t.Errorf("Expected *discordgo.MessageSend, got %T", resp.Content)
+		}
+
+		if resp.UserContext == nil {
+			t.Fatal("Expected non-nil UserContext")
+		}
+
+		if resp.UserContext.Next == nil {
+			t.Error("Expected non-nil UserContext.Next")
+		}
+	})
+
+	t.Run("MessageSend non-discord input returns error", func(t *testing.T) {
+		discordInput := &Input{
+			senderKey: "ch_user",
+			text:      ".help",
+			sentAt:    time.Now(),
+			channelID: ChannelID("ch"),
+		}
+		helpInput := sarah.NewHelpInput(discordInput)
+
+		_, err := NewResponse(helpInput, &discordgo.MessageSend{Content: "should fail"})
+		if err == nil {
+			t.Fatal("Expected an error for non-discord Input")
+		}
+	})
 }
 
 func TestWithSession(t *testing.T) {

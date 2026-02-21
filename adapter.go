@@ -216,9 +216,18 @@ func MessageToInput(m *discordgo.MessageCreate) (*Input, error) {
 	}, nil
 }
 
-// NewResponse creates a *sarah.CommandResponse with the given message.
+// ResponseContent constrains the content types accepted by NewResponse.
+// Valid types are string for plain text and *discordgo.MessageSend for rich content
+// such as embeds, components, and file attachments.
+type ResponseContent interface {
+	string | *discordgo.MessageSend
+}
+
+// NewResponse creates a *sarah.CommandResponse with the given content.
+// The content parameter may be a string for plain text messages or a
+// *discordgo.MessageSend for rich content such as embeds and components.
 // Pass RespOption values to customize the response.
-func NewResponse(input sarah.Input, message string, options ...RespOption) (*sarah.CommandResponse, error) {
+func NewResponse[T ResponseContent](input sarah.Input, content T, options ...RespOption) (*sarah.CommandResponse, error) {
 	if _, ok := input.(*Input); !ok {
 		return nil, fmt.Errorf("%T is not a *discord.Input", input)
 	}
@@ -229,7 +238,7 @@ func NewResponse(input sarah.Input, message string, options ...RespOption) (*sar
 	}
 
 	return &sarah.CommandResponse{
-		Content:     message,
+		Content:     content,
 		UserContext: stash.userContext,
 	}, nil
 }
