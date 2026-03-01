@@ -120,7 +120,10 @@ func registerReactCommand() {
 		Identifier("react").
 		MatchPattern(regexp.MustCompile(`^\.react`)).
 		Func(func(ctx context.Context, input sarah.Input) (*sarah.CommandResponse, error) {
-			di := input.(*discord.Input)
+			di, ok := input.(*discord.Input)
+			if !ok {
+				return nil, fmt.Errorf("unexpected input type: %T", input)
+			}
 			return discord.NewResponse(input, discord.SessionFunc(func(s *discordgo.Session) error {
 				return s.MessageReactionAdd(di.Event.ChannelID, di.Event.Message.ID, "👍")
 			}))

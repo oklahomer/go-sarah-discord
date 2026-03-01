@@ -111,7 +111,7 @@ func (a *Adapter) Run(ctx context.Context, enqueueInput func(sarah.Input) error,
 
 	err := a.session.Open()
 	if err != nil {
-		notifyErr(sarah.NewBotNonContinuableError(fmt.Sprintf("failed to open Discord session: %s", err.Error())))
+		notifyErr(sarah.NewBotNonContinuableError(fmt.Sprintf("failed to open Discord session: %s", err)))
 		return
 	}
 

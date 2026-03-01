@@ -93,7 +93,7 @@ func TestNewAdapter(t *testing.T) {
 			t.Fatal("Expected an error when no token and no session is given")
 		}
 
-		if err != ErrEmptyToken {
+		if !errors.Is(err, ErrEmptyToken) {
 			t.Errorf("Expected ErrEmptyToken, got %+v", err)
 		}
 	})
