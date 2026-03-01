@@ -27,6 +27,26 @@ type session interface {
 	ChannelMessageSendComplex(channelID string, data *discordgo.MessageSend, options ...discordgo.RequestOption) (*discordgo.Message, error)
 }
 
+// SessionFunc is a function that directly operates on a *discordgo.Session.
+// Use this as sarah.Output content to perform arbitrary Discord API operations
+// through the adapter's managed session lifecycle.
+//
+// The discordgo.Session type exposes over 200 methods for the Discord API.
+// Defining a dedicated content type for each method would create a large
+// mapping layer that is expensive to maintain and forces users to memorize
+// both the discordgo API and the corresponding wrapper types in this package.
+// SessionFunc avoids this entirely: callers pass a function that receives
+// the raw *discordgo.Session, gaining access to any current or future API
+// method with zero additional mapping.
+//
+// Example:
+//
+//	discord.SessionFunc(func(s *discordgo.Session) error {
+//	    _, err := s.MessageReactionAdd(channelID, messageID, "👍")
+//	    return err
+//	})
+type SessionFunc func(*discordgo.Session) error
+
 // ChannelID represents a Discord channel as sarah.OutputDestination.
 type ChannelID string
 
@@ -165,6 +185,16 @@ func (a *Adapter) SendMessage(_ context.Context, output sarah.Output) {
 			logger.Errorf("Failed to send help message to %s: %+v", channelID, err)
 		}
 
+	case SessionFunc:
+		s, ok := a.session.(*discordgo.Session)
+		if !ok {
+			logger.Errorf("SessionFunc requires *discordgo.Session, but got %T", a.session)
+			return
+		}
+		if err := content(s); err != nil {
+			logger.Errorf("Failed to execute SessionFunc: %+v", err)
+		}
+
 	default:
 		logger.Warnf("Unexpected output %#v", output)
 	}
@@ -216,9 +246,18 @@ func MessageToInput(m *discordgo.MessageCreate) (*Input, error) {
 	}, nil
 }
 
-// NewResponse creates a *sarah.CommandResponse with the given message.
+// ResponseContent constrains the content types accepted by NewResponse.
+// Valid types are string for plain text and *discordgo.MessageSend for rich content
+// such as embeds, components, and file attachments.
+type ResponseContent interface {
+	string | *discordgo.MessageSend | SessionFunc
+}
+
+// NewResponse creates a *sarah.CommandResponse with the given content.
+// The content parameter may be a string for plain text messages or a
+// *discordgo.MessageSend for rich content such as embeds and components.
 // Pass RespOption values to customize the response.
-func NewResponse(input sarah.Input, message string, options ...RespOption) (*sarah.CommandResponse, error) {
+func NewResponse[T ResponseContent](input sarah.Input, content T, options ...RespOption) (*sarah.CommandResponse, error) {
 	if _, ok := input.(*Input); !ok {
 		return nil, fmt.Errorf("%T is not a *discord.Input", input)
 	}
@@ -229,7 +268,7 @@ func NewResponse(input sarah.Input, message string, options ...RespOption) (*sar
 	}
 
 	return &sarah.CommandResponse{
-		Content:     message,
+		Content:     content,
 		UserContext: stash.userContext,
 	}, nil
 }
