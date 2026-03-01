@@ -59,6 +59,7 @@ func main() {
 	registerEchoCommand()
 	registerHelloCommand()
 	registerDescriptionCommand()
+	registerReactCommand()
 
 	// Set up a context that cancels on SIGINT or SIGTERM.
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
@@ -108,6 +109,23 @@ func registerHelloCommand() {
 			return discord.NewResponse(input, "Hello, World!")
 		}).
 		Instruction("Input .hello to receive a greeting.").
+		MustBuild()
+
+	sarah.RegisterCommandProps(props)
+}
+
+func registerReactCommand() {
+	props := sarah.NewCommandPropsBuilder().
+		BotType(discord.DISCORD).
+		Identifier("react").
+		MatchPattern(regexp.MustCompile(`^\.react`)).
+		Func(func(ctx context.Context, input sarah.Input) (*sarah.CommandResponse, error) {
+			di := input.(*discord.Input)
+			return discord.NewResponse(input, discord.SessionFunc(func(s *discordgo.Session) error {
+				return s.MessageReactionAdd(di.Event.ChannelID, di.Event.Message.ID, "👍")
+			}))
+		}).
+		Instruction("Input .react to add a 👍 reaction to your message.").
 		MustBuild()
 
 	sarah.RegisterCommandProps(props)
