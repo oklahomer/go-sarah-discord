@@ -932,6 +932,129 @@ func TestNewResponse(t *testing.T) {
 	})
 }
 
+func TestAdapter_SendMessage_SessionFunc(t *testing.T) {
+	t.Run("executes function with real session", func(t *testing.T) {
+		realSession := &discordgo.Session{}
+		adapter := &Adapter{config: NewConfig(), session: realSession}
+
+		var called bool
+		var receivedSession *discordgo.Session
+		fn := SessionFunc(func(s *discordgo.Session) error {
+			called = true
+			receivedSession = s
+			return nil
+		})
+
+		output := sarah.NewOutputMessage(ChannelID("ch-1"), fn)
+		adapter.SendMessage(context.Background(), output)
+
+		if !called {
+			t.Error("Expected SessionFunc to be called")
+		}
+		if receivedSession != realSession {
+			t.Error("Expected the adapter's session to be passed to SessionFunc")
+		}
+	})
+
+	t.Run("handles error from function", func(t *testing.T) {
+		realSession := &discordgo.Session{}
+		adapter := &Adapter{config: NewConfig(), session: realSession}
+
+		fn := SessionFunc(func(s *discordgo.Session) error {
+			return fmt.Errorf("reaction failed")
+		})
+
+		output := sarah.NewOutputMessage(ChannelID("ch-1"), fn)
+		// Should not panic when SessionFunc returns an error
+		adapter.SendMessage(context.Background(), output)
+	})
+
+	t.Run("handles non-discordgo session gracefully", func(t *testing.T) {
+		mock := &mockSession{}
+		adapter := &Adapter{config: NewConfig(), session: mock}
+
+		var called bool
+		fn := SessionFunc(func(s *discordgo.Session) error {
+			called = true
+			return nil
+		})
+
+		output := sarah.NewOutputMessage(ChannelID("ch-1"), fn)
+		// Should not panic when session is not *discordgo.Session
+		adapter.SendMessage(context.Background(), output)
+
+		if called {
+			t.Error("SessionFunc should NOT be called when session is not *discordgo.Session")
+		}
+	})
+}
+
+func TestNewResponse_SessionFunc(t *testing.T) {
+	t.Run("SessionFunc content", func(t *testing.T) {
+		input := &Input{
+			senderKey: "ch_user",
+			text:      ".react",
+			channelID: ChannelID("ch"),
+		}
+
+		fn := SessionFunc(func(s *discordgo.Session) error {
+			return nil
+		})
+
+		resp, err := NewResponse(input, fn)
+		if err != nil {
+			t.Fatalf("Unexpected error: %+v", err)
+		}
+
+		if _, ok := resp.Content.(SessionFunc); !ok {
+			t.Errorf("Expected content to be SessionFunc, got %T", resp.Content)
+		}
+	})
+
+	t.Run("SessionFunc with next", func(t *testing.T) {
+		input := &Input{
+			senderKey: "ch_user",
+			text:      ".react",
+			channelID: ChannelID("ch"),
+		}
+
+		fn := SessionFunc(func(s *discordgo.Session) error {
+			return nil
+		})
+
+		nextFunc := func(ctx context.Context, input sarah.Input) (*sarah.CommandResponse, error) {
+			return nil, nil
+		}
+
+		resp, err := NewResponse(input, fn, RespWithNext(nextFunc))
+		if err != nil {
+			t.Fatalf("Unexpected error: %+v", err)
+		}
+
+		if resp.UserContext == nil || resp.UserContext.Next == nil {
+			t.Error("Expected non-nil UserContext.Next")
+		}
+	})
+
+	t.Run("SessionFunc with non-discord input returns error", func(t *testing.T) {
+		discordInput := &Input{
+			senderKey: "ch_user",
+			text:      ".react",
+			channelID: ChannelID("ch"),
+		}
+		helpInput := sarah.NewHelpInput(discordInput)
+
+		fn := SessionFunc(func(s *discordgo.Session) error {
+			return nil
+		})
+
+		_, err := NewResponse(helpInput, fn)
+		if err == nil {
+			t.Fatal("Expected an error for non-discord Input")
+		}
+	})
+}
+
 func TestWithSession(t *testing.T) {
 	session := &discordgo.Session{}
 	adapter := &Adapter{}
